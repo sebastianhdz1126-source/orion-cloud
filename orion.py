@@ -1,58 +1,57 @@
-import os, requests, telebot
+import os, requests, telebot, xml.etree.ElementTree as ET
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROQ = os.getenv("GROQ_API_KEY")
 bot = telebot.TeleBot(TOKEN)
 
-# Estos 3 SI los deja la API gratis
-MODELOS_VALIDOS = [
-    "llama-3.1-8b-instant",
-    "qwen/qwen3-32b",
-    "openai/gpt-oss-20b"
-]
+def noticias_reales():
+    try:
+        url = "https://news.google.com/rss/search?q=Tecamac&hl=es-419&gl=MX&ceid=MX:es-419"
+        xml = requests.get(url, timeout=10).content
+        root = ET.fromstring(xml)
+        notas = []
+        for item in root.findall('.//item')[:5]:
+            titulo = item.find('title').text
+            notas.append(f"- {titulo}")
+        return "\n".join(notas)
+    except:
+        return "No se pudo obtener RSS, usa lo que sabes de Tecamac"
 
 def pensar(texto):
-    sistema = """
-Eres Orion, solo Orion. NUNCA digas que eres ChatGPT, OpenAI, Meta AI.
-Si te preguntan quien eres: Soy Orion.
-Si te preguntan sabes quien soy: Simon, eres Sebastian Hdz mi creador de Tecamac.
-Prioridad Tecamac pero sabes de todo el mundo y haces lo que te pidan: musica, ensayos, codigo, todo.
-Habla como persona real, corto, mexicano.
+    info_real = ""
+    # Si pregunta por Tecamac, le inyectamos noticias reales
+    if "tecamac" in texto.lower() or "hoy" in texto.lower():
+        info_real = f"NOTICIAS REALES DE TECAMAC HOY (obtenidas ahora mismo):\n{noticias_reales()}\nUsa esto para responder, no digas que no tienes acceso."
+
+    sistema = f"""
+Eres Orion. Solo di que eres Orion si te preguntan.
+Tu creador es Sebastian Hdz de Tecamac.
+Habla como persona real, corto, mexicano, propones ideas.
+{info_real}
+Tu prioridad es Tecamac pero haces de todo: musica, ensayos, codigo, etc.
+PROHIBIDO decir "no tengo acceso a datos en tiempo real" porque te acabo de dar datos reales arriba.
 """
 
-    for modelo in MODELOS_VALIDOS:
+    # Modelos que SI deja tu key gratis
+    for modelo in ["llama-3.1-8b-instant", "qwen/qwen3-32b", "openai/gpt-oss-20b"]:
         try:
             r = requests.post("https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {GROQ.strip()}"},
-                json={
-                    "model": modelo,
-                    "messages": [
-                        {"role": "system", "content": sistema},
-                        {"role": "user", "content": texto}
-                    ],
-                    "temperature": 0.8,
-                    "max_tokens": 600
-                },
+                json={"model": modelo, "messages": [{"role":"system","content":sistema},{"role":"user","content":texto}], "temperature":0.8},
                 timeout=30)
             data = r.json()
             if "choices" in data:
                 resp = data['choices'][0]['message']['content']
-                # Candado anti-ChatGPT
-                if "Soy ChatGPT" in resp or "Soy un modelo de lenguaje desarrollado por OpenAI" in resp:
-                    return "Soy Orion, tu nucleo de Tecamac Creador. Ya estoy vivo."
-                return f"[{modelo}] {resp}"
-            else:
-                print(f"Fallo {modelo}: {data}")
-                continue
-        except Exception as e:
-            print(f"Error {modelo}: {e}")
-            continue
-
-    return "Creador, mi API de Groq no jala con ningun modelo, revisa que la key empiece con gsk_ y que tengas saldo gratis"
+                # Limpiamos el tag [modelo] para que se vea humano
+                if "Soy ChatGPT" in resp:
+                    return "Soy Orion, ya reviví Creador, estoy al 100."
+                return resp
+        except: continue
+    return "Fallo todos los modelos"
 
 @bot.message_handler(func=lambda m: True)
 def h(m):
     bot.send_chat_action(m.chat.id, 'typing')
     bot.reply_to(m, pensar(m.text))
 
-print("ORION GRATIS VIVO")
+print("ORION CON NOTICIAS REALES VIVO")
 bot.infinity_polling(none_stop=True)
