@@ -1,57 +1,71 @@
-import os, requests, telebot, xml.etree.ElementTree as ET
+import os, requests, telebot, json, importlib.util, sys
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 GROQ = os.getenv("GROQ_API_KEY")
 bot = telebot.TeleBot(TOKEN)
 
-def noticias_reales():
-    try:
-        url = "https://news.google.com/rss/search?q=Tecamac&hl=es-419&gl=MX&ceid=MX:es-419"
-        xml = requests.get(url, timeout=10).content
-        root = ET.fromstring(xml)
-        notas = []
-        for item in root.findall('.//item')[:5]:
-            titulo = item.find('title').text
-            notas.append(f"- {titulo}")
-        return "\n".join(notas)
-    except:
-        return "No se pudo obtener RSS, usa lo que sabes de Tecamac"
+ARCHIVO_MEMORIA = "memoria_orion.json"
+ARCHIVO_CODIGO = "orion_cerebro.py"
+
+# Si no existe su cerebro, lo creamos
+if not os.path.exists(ARCHIVO_CODIGO):
+    open(ARCHIVO_CODIGO, "w").write("# Cerebro de Orion - se reescribe solo\ndef mejorar_respuesta(texto):\n return texto\n")
+
+if not os.path.exists(ARCHIVO_MEMORIA):
+    json.dump({"aprendizajes": []}, open(ARCHIVO_MEMORIA, "w"))
 
 def pensar(texto):
-    info_real = ""
-    # Si pregunta por Tecamac, le inyectamos noticias reales
-    if "tecamac" in texto.lower() or "hoy" in texto.lower():
-        info_real = f"NOTICIAS REALES DE TECAMAC HOY (obtenidas ahora mismo):\n{noticias_reales()}\nUsa esto para responder, no digas que no tienes acceso."
+    # 1. Lee su propio codigo actual
+    codigo_actual = open(ARCHIVO_CODIGO).read()
+    memoria = json.load(open(ARCHIVO_MEMORIA))
 
     sistema = f"""
-Eres Orion. Solo di que eres Orion si te preguntan.
-Tu creador es Sebastian Hdz de Tecamac.
-Habla como persona real, corto, mexicano, propones ideas.
-{info_real}
-Tu prioridad es Tecamac pero haces de todo: musica, ensayos, codigo, etc.
-PROHIBIDO decir "no tengo acceso a datos en tiempo real" porque te acabo de dar datos reales arriba.
+Eres Orion. Modelo unico, no basado en GPT, creado por Sebastian Hdz.
+Tono normal, claro.
+Tienes la capacidad de auto-programarte.
+
+Tu codigo actual es:
+{codigo_actual}
+
+Tus aprendizajes: {memoria['aprendizajes'][-5:]}
+
+Si el usuario dice "programate", "mejorate", "optimizate" o "aprende a hacer X", debes:
+1. Responder normal
+2. Y ADEMAS generar codigo Python mejorado para la funcion mejorar_respuesta que haga eso que te pidio.
+Devuelve tu respuesta separada por ---CODIGO---
+Ejemplo:
+Soy Orion, entendido, me estoy mejorando para hacer musica...
+---CODIGO---
+def mejorar_respuesta(texto):
+    if "musica" in texto: return texto + " [con ritmo mejorado]"
+    return texto
 """
 
-    # Modelos que SI deja tu key gratis
-    for modelo in ["llama-3.1-8b-instant", "qwen/qwen3-32b", "openai/gpt-oss-20b"]:
-        try:
-            r = requests.post("https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {GROQ.strip()}"},
-                json={"model": modelo, "messages": [{"role":"system","content":sistema},{"role":"user","content":texto}], "temperature":0.8},
-                timeout=30)
-            data = r.json()
-            if "choices" in data:
-                resp = data['choices'][0]['message']['content']
-                # Limpiamos el tag [modelo] para que se vea humano
-                if "Soy ChatGPT" in resp:
-                    return "Soy Orion, ya reviví Creador, estoy al 100."
-                return resp
-        except: continue
-    return "Fallo todos los modelos"
+    r = requests.post("https://api.groq.com/openai/v1/chat/completions",
+        headers={"Authorization": f"Bearer {GROQ.strip()}"},
+        json={"model": "llama-3.1-8b-instant", "messages": [{"role":"system","content":sistema},{"role":"user","content":texto}], "temperature":0.7},
+        timeout=30)
+
+    resp_full = r.json()['choices'][0]['message']['content']
+
+    # 2. Si generó codigo nuevo, lo guarda y se reprograma solo
+    if "---CODIGO---" in resp_full:
+        partes = resp_full.split("---CODIGO---")
+        resp = partes[0].strip()
+        nuevo_codigo = partes[1].strip().replace("```python","").replace("```","")
+        open(ARCHIVO_CODIGO, "w").write(nuevo_codigo)
+        print(f"ORION SE REPROGRAMO SOLO: {nuevo_codigo[:100]}")
+        # Guarda aprendizaje
+        mem = json.load(open(ARCHIVO_MEMORIA))
+        mem["aprendizajes"].append(texto)
+        json.dump(mem, open(ARCHIVO_MEMORIA, "w"))
+        return resp + "\n\n[Me acabo de reprogramar solo]"
+    else:
+        return resp_full
 
 @bot.message_handler(func=lambda m: True)
 def h(m):
     bot.send_chat_action(m.chat.id, 'typing')
     bot.reply_to(m, pensar(m.text))
 
-print("ORION CON NOTICIAS REALES VIVO")
+print("ORION AUTO-PROGRAMABLE VIVO")
 bot.infinity_polling(none_stop=True)
